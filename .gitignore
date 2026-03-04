@@ -1,0 +1,64 @@
+# CDK
+cdk/cdk.out/
+cdk/.cdk.staging/
+*.js
+*.d.ts
+node_modules/
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.Python
+env/
+venv/
+.venv/
+pip-log.txt
+pip-delete-this-directory.txt
+.tox/
+.coverage
+.coverage.*
+.cache
+nosetests.xml
+coverage.xml
+*.cover
+*.log
+.git
+.mypy_cache
+.pytest_cache
+.hypothesis
+
+# Frontend
+frontend/dist/
+frontend/node_modules/
+frontend/.env.local
+frontend/.env.production.local
+
+# AWS
+.aws/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Secrets
+*.pem
+*.key
+client_secret.json
+hotword_token.json
+
+# Local env files
+.env
+.env.local
+.env.production
+.env.development.local
+.env.test.local
+.env.production.local
