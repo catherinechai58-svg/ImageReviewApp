@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 
 interface PromptOption {
@@ -19,16 +19,22 @@ interface FormData {
   template_id: string;
   run_mode: string;
   model_id: string;
+  date_from: string;
+  date_to: string;
 }
 
-const emptyForm: FormData = { name: '', description: '', channels: '', template_id: '', run_mode: 'batch', model_id: '' };
+const emptyForm: FormData = { name: '', description: '', channels: '', template_id: '', run_mode: 'batch', model_id: '', date_from: '', date_to: '' };
 
 export default function TaskFormPage() {
   const navigate = useNavigate();
+  const { id } = useParams<{ id: string }>();
+  const isEdit = !!id;
+
   const [form, setForm] = useState<FormData>(emptyForm);
   const [prompts, setPrompts] = useState<PromptOption[]>([]);
   const [models, setModels] = useState<ModelOption[]>([]);
   const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -36,9 +42,29 @@ export default function TaskFormPage() {
     api.get('/models').then((res) => {
       const list = res.data.data || [];
       setModels(list);
-      if (list.length > 0) setForm((prev) => ({ ...prev, model_id: prev.model_id || list[0].id }));
+      if (!isEdit && list.length > 0) setForm((prev) => ({ ...prev, model_id: prev.model_id || list[0].id }));
     }).catch(() => {});
   }, []);
+
+  useEffect(() => {
+    if (!isEdit) return;
+    setLoading(true);
+    api.get(`/tasks/${id}`).then((res) => {
+      const t = res.data.data;
+      setForm({
+        name: t.name || '',
+        description: t.description || '',
+        channels: (t.channel_ids || []).join('\n'),
+        template_id: t.template_id || '',
+        run_mode: t.run_mode || 'batch',
+        model_id: t.model_id || '',
+        date_from: t.date_from || '',
+        date_to: t.date_to || '',
+      });
+    }).catch(() => {
+      setError('获取任务详情失败');
+    }).finally(() => setLoading(false));
+  }, [id]);
 
   const handleChange = (field: keyof FormData, value: string) => {
     setForm((prev) => ({ ...prev, [field]: value }));
@@ -58,28 +84,39 @@ export default function TaskFormPage() {
       .map((s) => s.trim())
       .filter(Boolean);
 
+    const payload = {
+      name: form.name.trim(),
+      description: form.description.trim(),
+      channel_ids: channelIds,
+      template_id: form.template_id,
+      run_mode: form.run_mode,
+      model_id: form.model_id,
+      date_from: form.date_from,
+      date_to: form.date_to,
+    };
+
     setSaving(true);
     try {
-      await api.post('/tasks', {
-        name: form.name.trim(),
-        description: form.description.trim(),
-        channel_ids: channelIds,
-        template_id: form.template_id,
-        run_mode: form.run_mode,
-        model_id: form.model_id,
-      });
-      navigate('/tasks');
+      if (isEdit) {
+        await api.put(`/tasks/${id}`, payload);
+        navigate(`/tasks/${id}`);
+      } else {
+        await api.post('/tasks', payload);
+        navigate('/tasks');
+      }
     } catch (err: any) {
-      const msg = err.response?.data?.error?.message || '创建任务失败';
+      const msg = err.response?.data?.error?.message || (isEdit ? '更新任务失败' : '创建任务失败');
       setError(msg);
     } finally {
       setSaving(false);
     }
   };
 
+  if (loading) return <div style={{ padding: '20px', color: '#999' }}>加载中...</div>;
+
   return (
     <div style={{ maxWidth: '640px' }}>
-      <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>创建任务</h2>
+      <h2 style={{ fontSize: '18px', marginBottom: '16px' }}>{isEdit ? '编辑任务' : '创建任务'}</h2>
 
       {error && <div style={styles.errorMsg}>{error}</div>}
 
@@ -148,6 +185,27 @@ export default function TaskFormPage() {
           </select>
         </div>
 
+        {/* 时间范围 */}
+        <div style={styles.field}>
+          <label style={styles.label}>视频时间范围</label>
+          <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
+            <input
+              type="date"
+              style={{ ...styles.input, width: 'auto', flex: 1 }}
+              value={form.date_from}
+              onChange={(e) => handleChange('date_from', e.target.value)}
+            />
+            <span style={{ color: '#999' }}>至</span>
+            <input
+              type="date"
+              style={{ ...styles.input, width: 'auto', flex: 1 }}
+              value={form.date_to}
+              onChange={(e) => handleChange('date_to', e.target.value)}
+            />
+          </div>
+          <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>只拉取指定时间段内发布的视频封面，留空则不限制</div>
+        </div>
+
         {/* 运行模式 */}
         <div style={styles.field}>
           <label style={styles.label}>运行模式 <span style={{ color: '#ff4d4f' }}>*</span></label>
@@ -166,9 +224,9 @@ export default function TaskFormPage() {
         {/* 按钮 */}
         <div style={{ display: 'flex', gap: '8px', marginTop: '16px' }}>
           <button type="submit" disabled={saving} style={styles.primaryBtn}>
-            {saving ? '创建中...' : '创建任务'}
+            {saving ? (isEdit ? '保存中...' : '创建中...') : (isEdit ? '保存修改' : '创建任务')}
           </button>
-          <button type="button" onClick={() => navigate('/tasks')} style={styles.defaultBtn}>取消</button>
+          <button type="button" onClick={() => navigate(isEdit ? `/tasks/${id}` : '/tasks')} style={styles.defaultBtn}>取消</button>
         </div>
       </form>
     </div>

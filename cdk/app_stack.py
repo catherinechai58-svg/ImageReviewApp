@@ -37,6 +37,7 @@ class AppStack(cdk.Stack):
             "TASKS_TABLE": self.infra.tasks_table.table_name,
             "TASK_RESULTS_TABLE": self.infra.task_results_table.table_name,
             "TASK_LOGS_TABLE": self.infra.task_logs_table.table_name,
+            "SETTINGS_TABLE": self.infra.settings_table.table_name,
             "IMAGE_BUCKET": self.infra.image_bucket.bucket_name,
             "AWS_REGION_NAME": self.region,
             "USER_POOL_ID": self.infra.user_pool.user_pool_id,
@@ -114,6 +115,7 @@ class AppStack(cdk.Stack):
         self.infra.tasks_table.grant_read_write_data(task_role)
         self.infra.task_results_table.grant_read_write_data(task_role)
         self.infra.task_logs_table.grant_read_write_data(task_role)
+        self.infra.settings_table.grant_read_write_data(task_role)
 
         # S3 读写
         self.infra.image_bucket.grant_read_write(task_role)
@@ -137,6 +139,10 @@ class AppStack(cdk.Stack):
                 actions=[
                     "cognito-idp:AdminInitiateAuth",
                     "cognito-idp:AdminRespondToAuthChallenge",
+                    "cognito-idp:AdminCreateUser",
+                    "cognito-idp:AdminDeleteUser",
+                    "cognito-idp:AdminSetUserPassword",
+                    "cognito-idp:ListUsers",
                     "cognito-idp:ChangePassword",
                 ],
                 resources=[self.infra.user_pool.user_pool_arn],

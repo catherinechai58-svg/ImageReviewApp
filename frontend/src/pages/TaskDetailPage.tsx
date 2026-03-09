@@ -1,8 +1,7 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import api from '../services/api';
 
-// 任务详情
 interface TaskDetail {
   task_id: string;
   name: string;
@@ -19,7 +18,6 @@ interface TaskDetail {
   updated_at: string;
 }
 
-// 日志条目
 interface LogEntry {
   timestamp: string;
   operation_type: string;
@@ -28,9 +26,9 @@ interface LogEntry {
   message: string;
 }
 
-// 状态颜色
 const statusColors: Record<string, { bg: string; color: string }> = {
   pending: { bg: '#f0f0f0', color: '#666' },
+  queued: { bg: '#f9f0ff', color: '#722ed1' },
   fetching: { bg: '#e6f4ff', color: '#1677ff' },
   downloading: { bg: '#e6f4ff', color: '#1677ff' },
   recognizing: { bg: '#e6f4ff', color: '#1677ff' },
@@ -40,7 +38,7 @@ const statusColors: Record<string, { bg: string; color: string }> = {
 };
 
 const statusLabels: Record<string, string> = {
-  pending: '待执行', fetching: '获取封面中', downloading: '下载图片中',
+  pending: '待执行', queued: '排队中', fetching: '获取封面中', downloading: '下载图片中',
   recognizing: '识别中', completed: '已完成', failed: '失败', partial_completed: '部分完成',
 };
 
@@ -55,11 +53,22 @@ export default function TaskDetailPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [actionLoading, setActionLoading] = useState('');
+  const [templateName, setTemplateName] = useState('');
 
   const fetchTask = async () => {
     try {
       const res = await api.get(`/tasks/${id}`);
-      setTask(res.data.data);
+      const t = res.data.data;
+      setTask(t);
+      // 获取模板名称
+      if (t.template_id) {
+        try {
+          const tplRes = await api.get(`/prompts/${t.template_id}`);
+          setTemplateName(tplRes.data.data?.name || t.template_id);
+        } catch {
+          setTemplateName(t.template_id);
+        }
+      }
     } catch {
       setError('获取任务详情失败');
     }
@@ -69,17 +78,34 @@ export default function TaskDetailPage() {
     try {
       const res = await api.get(`/tasks/${id}/logs`);
       setLogs(res.data.data || []);
-    } catch {
-      // 日志加载失败不阻塞页面
-    }
+    } catch { /* ignore */ }
   };
+
+  const logsEndRef = useRef<HTMLDivElement>(null);
+  const logsContainerRef = useRef<HTMLDivElement>(null);
+
+  const isRunning = task ? ['queued', 'fetching', 'downloading', 'recognizing'].includes(task.status) : false;
 
   useEffect(() => {
     setLoading(true);
     Promise.all([fetchTask(), fetchLogs()]).finally(() => setLoading(false));
   }, [id]);
 
-  // 执行任务
+  // 运行中时每 5 秒自动刷新任务状态和日志
+  useEffect(() => {
+    if (!isRunning) return;
+    const timer = setInterval(() => {
+      fetchTask();
+      fetchLogs();
+    }, 5000);
+    return () => clearInterval(timer);
+  }, [isRunning, id]);
+
+  // 日志更新时自动滚动到底部
+  useEffect(() => {
+    logsEndRef.current?.scrollIntoView({ behavior: 'smooth' });
+  }, [logs]);
+
   const handleExecute = async () => {
     setActionLoading('execute');
     setError('');
@@ -93,7 +119,6 @@ export default function TaskDetailPage() {
     }
   };
 
-  // 重做失败图片
   const handleRetry = async () => {
     setActionLoading('retry');
     setError('');
@@ -107,14 +132,27 @@ export default function TaskDetailPage() {
     }
   };
 
+  const handleRetryAll = async () => {
+    if (!confirm('确定要强制重做全部图片吗？这将重新识别所有图片（包括已成功的）。')) return;
+    setActionLoading('retryAll');
+    setError('');
+    try {
+      await api.post(`/tasks/${id}/retry-all`);
+      await fetchTask();
+    } catch (err: any) {
+      setError(err.response?.data?.error?.message || '强制重做失败');
+    } finally {
+      setActionLoading('');
+    }
+  };
+
   if (loading) return <div style={{ padding: '20px', color: '#999' }}>加载中...</div>;
   if (!task) return <div style={{ padding: '20px', color: '#ff4d4f' }}>任务不存在</div>;
 
   const sc = statusColors[task.status] || statusColors.pending;
-  // 可执行：仅 pending 状态
   const canExecute = task.status === 'pending';
-  // 可重做：completed、failed、partial_completed
   const canRetry = ['completed', 'failed', 'partial_completed'].includes(task.status);
+  const canEdit = ['pending', 'failed', 'partial_completed', 'completed'].includes(task.status);
 
   return (
     <div>
@@ -131,6 +169,11 @@ export default function TaskDetailPage() {
 
       {/* 操作按钮 */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '20px' }}>
+        {canEdit && (
+          <button onClick={() => navigate(`/tasks/${id}/edit`)} style={styles.defaultBtn}>
+            编辑任务
+          </button>
+        )}
         {canExecute && (
           <button onClick={handleExecute} disabled={!!actionLoading} style={styles.primaryBtn}>
             {actionLoading === 'execute' ? '执行中...' : '执行任务'}
@@ -141,7 +184,11 @@ export default function TaskDetailPage() {
             {actionLoading === 'retry' ? '重做中...' : '重做失败图片'}
           </button>
         )}
-        {/* 查看结果：任务有结果时显示 */}
+        {canRetry && (
+          <button onClick={handleRetryAll} disabled={!!actionLoading} style={styles.dangerBtn}>
+            {actionLoading === 'retryAll' ? '重做中...' : '强制重做全部'}
+          </button>
+        )}
         {(task.total_images ?? 0) > 0 && (
           <button onClick={() => navigate(`/tasks/${id}/results`)} style={styles.primaryBtn}>
             查看结果
@@ -151,19 +198,25 @@ export default function TaskDetailPage() {
 
       {/* 配置信息 + 进度统计 */}
       <div style={{ display: 'flex', gap: '16px', marginBottom: '20px', flexWrap: 'wrap' }}>
-        {/* 配置信息 */}
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>配置信息</h3>
           <div style={styles.infoRow}><span style={styles.infoLabel}>描述</span><span>{task.description || '-'}</span></div>
           <div style={styles.infoRow}><span style={styles.infoLabel}>运行模式</span><span>{modeLabels[task.run_mode] || task.run_mode}</span></div>
           <div style={styles.infoRow}><span style={styles.infoLabel}>推理模型</span><span style={{ fontSize: '12px', fontFamily: 'monospace' }}>{task.model_id || '-'}</span></div>
-          <div style={styles.infoRow}><span style={styles.infoLabel}>模板 ID</span><span style={{ fontSize: '12px', fontFamily: 'monospace' }}>{task.template_id}</span></div>
+          <div style={styles.infoRow}>
+            <span style={styles.infoLabel}>提示词模板</span>
+            <span
+              style={{ color: '#1677ff', cursor: 'pointer', fontSize: '13px' }}
+              onClick={() => navigate(`/prompts/${task.template_id}/view`)}
+            >
+              {templateName || task.template_id}
+            </span>
+          </div>
           <div style={styles.infoRow}><span style={styles.infoLabel}>频道数</span><span>{task.channel_ids?.length || 0}</span></div>
           <div style={styles.infoRow}><span style={styles.infoLabel}>创建时间</span><span>{new Date(task.created_at).toLocaleString()}</span></div>
           <div style={styles.infoRow}><span style={styles.infoLabel}>更新时间</span><span>{new Date(task.updated_at).toLocaleString()}</span></div>
         </div>
 
-        {/* 进度统计 */}
         <div style={styles.card}>
           <h3 style={styles.cardTitle}>进度统计</h3>
           <div style={{ display: 'flex', gap: '24px', marginTop: '8px' }}>
@@ -204,7 +257,7 @@ export default function TaskDetailPage() {
         {logs.length === 0 ? (
           <div style={{ color: '#999', fontSize: '13px', padding: '12px 0' }}>暂无日志</div>
         ) : (
-          <div style={{ maxHeight: '360px', overflowY: 'auto', marginTop: '8px' }}>
+          <div ref={logsContainerRef} style={{ maxHeight: '360px', overflowY: 'auto', marginTop: '8px' }}>
             <table style={styles.table}>
               <thead>
                 <tr>
@@ -224,11 +277,18 @@ export default function TaskDetailPage() {
                     <td style={styles.td}>
                       <span style={{ color: log.result === 'success' ? '#52c41a' : '#ff4d4f' }}>{log.result}</span>
                     </td>
-                    <td style={{ ...styles.td, maxWidth: '240px', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{log.message || '-'}</td>
+                    <td style={{
+                      ...styles.td, maxWidth: '240px', overflow: 'hidden',
+                      textOverflow: 'ellipsis', whiteSpace: 'nowrap', cursor: 'default',
+                      position: 'relative',
+                    }} title={log.message || '-'}>
+                      {log.message || '-'}
+                    </td>
                   </tr>
                 ))}
               </tbody>
             </table>
+            <div ref={logsEndRef} />
           </div>
         )}
       </div>
@@ -243,6 +303,14 @@ const styles: Record<string, React.CSSProperties> = {
   },
   warningBtn: {
     background: '#fa8c16', color: '#fff', border: 'none', borderRadius: '4px',
+    padding: '6px 16px', cursor: 'pointer', fontSize: '14px',
+  },
+  defaultBtn: {
+    background: '#fff', border: '1px solid #d9d9d9', borderRadius: '4px',
+    padding: '6px 16px', cursor: 'pointer', fontSize: '14px',
+  },
+  dangerBtn: {
+    background: '#ff4d4f', color: '#fff', border: 'none', borderRadius: '4px',
     padding: '6px 16px', cursor: 'pointer', fontSize: '14px',
   },
   errorMsg: {

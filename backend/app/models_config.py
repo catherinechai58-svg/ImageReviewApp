@@ -11,10 +11,8 @@ import os
 
 # 内置默认模型列表
 _DEFAULT_MODELS = [
-    {"id": "apac.amazon.nova-lite-v1:0", "name": "Nova Lite v1 (APAC)"},
-    {"id": "amazon.nova-lite-v1:0", "name": "Nova Lite v1"},
-    {"id": "apac.amazon.nova-pro-v1:0", "name": "Nova Pro v1 (APAC)"},
-    {"id": "amazon.nova-pro-v1:0", "name": "Nova Pro v1"},
+    {"id": "apac.amazon.nova-lite-v1:0", "name": "Nova Lite v1"},
+    {"id": "global.amazon.nova-2-lite-v1:0", "name": "Nova Lite v2"},
 ]
 
 

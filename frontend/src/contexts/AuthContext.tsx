@@ -1,10 +1,19 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from 'react';
-import { login as authLogin, logout as authLogout, isAuthenticated, refreshSession, type AuthTokens } from '../services/auth';
+import {
+  login as authLogin,
+  forceChangePassword as authForceChange,
+  logout as authLogout,
+  isAuthenticated,
+  refreshSession,
+  type AuthTokens,
+  type ChallengeResult,
+} from '../services/auth';
 
 interface AuthContextType {
   authenticated: boolean;
   loading: boolean;
-  login: (username: string, password: string) => Promise<void>;
+  login: (username: string, password: string) => Promise<AuthTokens | ChallengeResult>;
+  forceChangePassword: (username: string, newPassword: string, session: string) => Promise<void>;
   logout: () => void;
 }
 
@@ -14,40 +23,29 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [authenticated, setAuthenticated] = useState(false);
   const [loading, setLoading] = useState(true);
 
-  // 初始化时检查认证状态
   useEffect(() => {
-    const init = async () => {
-      try {
-        if (isAuthenticated()) {
-          setAuthenticated(true);
-        } else {
-          // 尝试刷新 token
-          const tokens = await refreshSession();
-          setAuthenticated(!!tokens);
-        }
-      } catch {
-        // Cognito 配置无效或网络错误，视为未认证
-        setAuthenticated(false);
-      }
-      setLoading(false);
-    };
-    init();
+    setAuthenticated(isAuthenticated());
+    setLoading(false);
   }, []);
 
-  // 自动刷新 token（每 10 分钟检查一次）
   useEffect(() => {
     if (!authenticated) return;
     const interval = setInterval(async () => {
       const tokens = await refreshSession();
-      if (!tokens) {
-        setAuthenticated(false);
-      }
+      if (!tokens) setAuthenticated(false);
     }, 10 * 60 * 1000);
     return () => clearInterval(interval);
   }, [authenticated]);
 
   const login = useCallback(async (username: string, password: string) => {
-    await authLogin(username, password);
+    const result = await authLogin(username, password);
+    if ('challenge' in result) return result;
+    setAuthenticated(true);
+    return result;
+  }, []);
+
+  const forceChangePassword = useCallback(async (username: string, newPassword: string, session: string) => {
+    await authForceChange(username, newPassword, session);
     setAuthenticated(true);
   }, []);
 
@@ -57,7 +55,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   return (
-    <AuthContext.Provider value={{ authenticated, loading, login, logout }}>
+    <AuthContext.Provider value={{ authenticated, loading, login, forceChangePassword, logout }}>
       {children}
     </AuthContext.Provider>
   );

@@ -1,26 +1,12 @@
-import {
-  CognitoUserPool,
-  CognitoUser,
-  AuthenticationDetails,
-  CognitoUserSession,
-} from 'amazon-cognito-identity-js';
+import axios from 'axios';
 import { config } from '../config';
 
-// Cognito 用户池实例（配置无效时为 null）
-let userPool: CognitoUserPool | null = null;
-try {
-  if (config.cognito.userPoolId && config.cognito.clientId
-      && !config.cognito.userPoolId.includes('XXXXX')) {
-    userPool = new CognitoUserPool({
-      UserPoolId: config.cognito.userPoolId,
-      ClientId: config.cognito.clientId,
-    });
-  }
-} catch {
-  // 配置无效，userPool 保持 null
-}
+const authApi = axios.create({
+  baseURL: config.apiBaseUrl,
+  timeout: 30000,
+  headers: { 'Content-Type': 'application/json' },
+});
 
-// token 存储 key
 const TOKEN_KEY = 'auth_tokens';
 
 export interface AuthTokens {
@@ -29,18 +15,22 @@ export interface AuthTokens {
   refreshToken: string;
 }
 
-// 保存 token 到 localStorage
-function saveTokens(session: CognitoUserSession): AuthTokens {
+export interface ChallengeResult {
+  challenge: string;
+  session: string;
+  username: string;
+}
+
+function saveTokens(data: any): AuthTokens {
   const tokens: AuthTokens = {
-    idToken: session.getIdToken().getJwtToken(),
-    accessToken: session.getAccessToken().getJwtToken(),
-    refreshToken: session.getRefreshToken().getToken(),
+    idToken: data.id_token,
+    accessToken: data.access_token,
+    refreshToken: data.refresh_token,
   };
   localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
   return tokens;
 }
 
-// 获取已存储的 token
 export function getStoredTokens(): AuthTokens | null {
   const raw = localStorage.getItem(TOKEN_KEY);
   if (!raw) return null;
@@ -51,64 +41,39 @@ export function getStoredTokens(): AuthTokens | null {
   }
 }
 
-// 清除 token
 export function clearTokens(): void {
   localStorage.removeItem(TOKEN_KEY);
 }
 
-// 登录
-export function login(username: string, password: string): Promise<AuthTokens> {
-  return new Promise((resolve, reject) => {
-    if (!userPool) {
-      reject(new Error('Cognito 未配置，请检查环境变量'));
-      return;
-    }
-    const user = new CognitoUser({ Username: username, Pool: userPool });
-    const authDetails = new AuthenticationDetails({ Username: username, Password: password });
+/**
+ * 登录 — 返回 tokens 或 challenge 信息
+ */
+export async function login(username: string, password: string): Promise<AuthTokens | ChallengeResult> {
+  const res = await authApi.post('/auth/login', { username, password });
+  const data = res.data.data;
 
-    user.authenticateUser(authDetails, {
-      onSuccess: (session) => {
-        resolve(saveTokens(session));
-      },
-      onFailure: (err) => {
-        reject(new Error(err.message || '登录失败'));
-      },
-      // 首次登录需要修改密码的场景
-      newPasswordRequired: () => {
-        reject(new Error('NEW_PASSWORD_REQUIRED'));
-      },
-    });
-  });
+  if (data.challenge === 'NEW_PASSWORD_REQUIRED') {
+    return { challenge: data.challenge, session: data.session, username: data.username };
+  }
+
+  return saveTokens(data);
 }
 
-// 刷新 token
-export function refreshSession(): Promise<AuthTokens | null> {
-  return new Promise((resolve) => {
-    if (!userPool) {
-      resolve(null);
-      return;
-    }
-    const currentUser = userPool.getCurrentUser();
-    if (!currentUser) {
-      resolve(null);
-      return;
-    }
-    currentUser.getSession((err: Error | null, session: CognitoUserSession | null) => {
-      if (err || !session || !session.isValid()) {
-        clearTokens();
-        resolve(null);
-        return;
-      }
-      resolve(saveTokens(session));
-    });
+/**
+ * 首次登录强制修改密码
+ */
+export async function forceChangePassword(username: string, newPassword: string, session: string): Promise<AuthTokens> {
+  const res = await authApi.post('/auth/force-change-password', {
+    username,
+    new_password: newPassword,
+    session,
   });
+  return saveTokens(res.data.data);
 }
 
-// 检查当前是否已认证（token 有效）
 export function isAuthenticated(): boolean {
   const tokens = getStoredTokens();
   if (!tokens) return false;
-  // 简单检查 token 是否过期（解析 JWT payload）
   try {
     const payload = JSON.parse(atob(tokens.idToken.split('.')[1]));
     return payload.exp * 1000 > Date.now();
@@ -117,13 +82,26 @@ export function isAuthenticated(): boolean {
   }
 }
 
-// 登出
-export function logout(): void {
-  if (userPool) {
-    const currentUser = userPool.getCurrentUser();
-    if (currentUser) {
-      currentUser.signOut();
-    }
+export function getCurrentUsername(): string {
+  const tokens = getStoredTokens();
+  if (!tokens) return '';
+  try {
+    const payload = JSON.parse(atob(tokens.idToken.split('.')[1]));
+    return payload['cognito:username'] || payload['username'] || '';
+  } catch {
+    return '';
   }
+}
+
+export function logout(): void {
   clearTokens();
+}
+
+// Stub for compatibility — refresh not implemented via backend yet
+export async function refreshSession(): Promise<AuthTokens | null> {
+  const tokens = getStoredTokens();
+  if (!tokens) return null;
+  if (isAuthenticated()) return tokens;
+  clearTokens();
+  return null;
 }

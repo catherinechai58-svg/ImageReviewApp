@@ -2,15 +2,18 @@ import { useEffect, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import api from '../services/api';
 
-// 表单数据
+const REVIEW_RULES_EXAMPLE = `- 如果 contains_child 为 true 或 is_child_targeted 为 true，则 review_result 必须为 "fail"
+- 仅当 contains_child 为 false 且 is_child_targeted 为 false 时，review_result 才为 "pass"`;
+
 interface FormData {
   name: string;
   description: string;
-  system_prompt: string;
   user_prompt: string;
+  review_rules: string;
+  visibility: string;
 }
 
-const emptyForm: FormData = { name: '', description: '', system_prompt: '', user_prompt: '' };
+const emptyForm: FormData = { name: '', description: '', user_prompt: '', review_rules: '', visibility: 'private' };
 
 export default function PromptFormPage() {
   const navigate = useNavigate();
@@ -22,7 +25,6 @@ export default function PromptFormPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  // 编辑模式：加载现有模板
   useEffect(() => {
     if (!id) return;
     setLoading(true);
@@ -30,8 +32,9 @@ export default function PromptFormPage() {
       .then((res) => setForm({
         name: res.data.data.name || '',
         description: res.data.data.description || '',
-        system_prompt: res.data.data.system_prompt || '',
         user_prompt: res.data.data.user_prompt || '',
+        review_rules: res.data.data.review_rules || '',
+        visibility: res.data.data.visibility || 'private',
       }))
       .catch(() => setError('加载模板失败'))
       .finally(() => setLoading(false));
@@ -41,14 +44,21 @@ export default function PromptFormPage() {
     setForm((prev) => ({ ...prev, [field]: value }));
   };
 
+  const fillExample = () => {
+    setForm((prev) => ({ ...prev, review_rules: REVIEW_RULES_EXAMPLE }));
+  };
+
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setError('');
 
-    // 前端基本校验
     if (!form.name.trim()) { setError('名称不能为空'); return; }
-    if (!form.system_prompt.trim()) { setError('系统提示词不能为空'); return; }
     if (!form.user_prompt.trim()) { setError('用户提示词不能为空'); return; }
+    if (!form.review_rules.trim()) { setError('审核判定规则不能为空'); return; }
+    if (!form.review_rules.includes('review_result')) {
+      setError('审核判定规则必须包含 review_result 的判定逻辑');
+      return;
+    }
 
     setSaving(true);
     try {
@@ -97,28 +107,55 @@ export default function PromptFormPage() {
           />
         </div>
 
-        {/* 系统提示词 */}
+        {/* 可见性 */}
         <div style={styles.field}>
-          <label style={styles.label}>系统提示词 <span style={{ color: '#ff4d4f' }}>*</span></label>
-          <textarea
-            style={styles.textarea}
-            rows={6}
-            value={form.system_prompt}
-            onChange={(e) => handleChange('system_prompt', e.target.value)}
-            placeholder="定义模型角色和行为，例如：你是一个图片内容审核专家..."
-          />
+          <label style={styles.label}>可见性</label>
+          <div style={{ display: 'flex', gap: '16px' }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input type="radio" name="visibility" value="private" checked={form.visibility === 'private'} onChange={() => handleChange('visibility', 'private')} />
+              个人（仅自己可见）
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: '4px', cursor: 'pointer' }}>
+              <input type="radio" name="visibility" value="public" checked={form.visibility === 'public'} onChange={() => handleChange('visibility', 'public')} />
+              公开（所有人可见）
+            </label>
+          </div>
         </div>
 
         {/* 用户提示词 */}
         <div style={styles.field}>
-          <label style={styles.label}>用户提示词 <span style={{ color: '#ff4d4f' }}>*</span></label>
+          <label style={styles.label}>用户提示词（分析要求） <span style={{ color: '#ff4d4f' }}>*</span></label>
           <textarea
             style={styles.textarea}
-            rows={6}
+            rows={8}
             value={form.user_prompt}
             onChange={(e) => handleChange('user_prompt', e.target.value)}
-            placeholder="定义具体分析指令，例如：分析这张图片是否包含儿童..."
+            placeholder={'定义 JSON 输出结构，例如：\n{\n    "image_name": "{image_name}",\n    "contains_child": true or false,\n    "age_group": "infant" | "toddler" | "kids" | "teen" | "none" | "unknown",\n    "is_child_targeted": true or false,\n    "confidence": 0.0 to 1.0\n}'}
           />
+        </div>
+
+        {/* 审核判定规则 */}
+        <div style={styles.field}>
+          <label style={styles.label}>
+            审核判定规则 <span style={{ color: '#ff4d4f' }}>*</span>
+            <span style={{ fontSize: '12px', color: '#999', marginLeft: '8px' }}>
+              （必须包含 review_result 的判定逻辑）
+            </span>
+          </label>
+          <textarea
+            style={styles.textarea}
+            rows={4}
+            value={form.review_rules}
+            onChange={(e) => handleChange('review_rules', e.target.value)}
+            placeholder="定义 review_result 的判定规则，例如：如果 contains_child 为 true，则 review_result 为 fail..."
+          />
+          <div style={{ marginTop: '6px', display: 'flex', alignItems: 'flex-start', gap: '8px' }}>
+            <button type="button" onClick={fillExample} style={styles.smallBtn}>填入样例</button>
+            <div style={styles.exampleBox}>
+              <div style={{ fontSize: '12px', color: '#666', marginBottom: '4px' }}>样例规则：</div>
+              <pre style={{ margin: 0, fontSize: '12px', color: '#333', whiteSpace: 'pre-wrap' }}>{REVIEW_RULES_EXAMPLE}</pre>
+            </div>
+          </div>
         </div>
 
         {/* 按钮 */}
@@ -147,6 +184,13 @@ const styles: Record<string, React.CSSProperties> = {
   textarea: {
     width: '100%', padding: '6px 10px', border: '1px solid #d9d9d9', borderRadius: '4px',
     fontSize: '14px', fontFamily: 'monospace', resize: 'vertical', boxSizing: 'border-box',
+  },
+  exampleBox: {
+    flex: 1, padding: '8px 12px', background: '#f6ffed', border: '1px solid #b7eb8f', borderRadius: '4px',
+  },
+  smallBtn: {
+    background: '#fff', border: '1px solid #1677ff', borderRadius: '4px', color: '#1677ff',
+    padding: '4px 10px', cursor: 'pointer', fontSize: '12px', whiteSpace: 'nowrap',
   },
   primaryBtn: {
     background: '#1677ff', color: '#fff', border: 'none', borderRadius: '4px',

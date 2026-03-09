@@ -143,6 +143,18 @@ class InfraStack(cdk.Stack):
             removal_policy=RemovalPolicy.DESTROY,
         )
 
+        # 7. Settings 表
+        self.settings_table = dynamodb.Table(
+            self,
+            "SettingsTable",
+            table_name="ImageReviewApp-Settings",
+            partition_key=dynamodb.Attribute(
+                name="setting_key", type=dynamodb.AttributeType.STRING
+            ),
+            billing_mode=dynamodb.BillingMode.PAY_PER_REQUEST,
+            removal_policy=RemovalPolicy.DESTROY,
+        )
+
         # ── Cognito User Pool ──
 
         self.user_pool = cognito.UserPool(

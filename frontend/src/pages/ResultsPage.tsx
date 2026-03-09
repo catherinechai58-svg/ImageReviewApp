@@ -33,6 +33,9 @@ export default function ResultsPage() {
 
   // 展开的 result_json 行
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
+  
+  // 放大图片
+  const [enlargedImage, setEnlargedImage] = useState<string | null>(null);
 
   // 加载结果
   const fetchResults = useCallback(async (append = false) => {
@@ -69,7 +72,7 @@ export default function ResultsPage() {
   const handleDownload = async () => {
     try {
       const res = await api.get(`/tasks/${id}/results/download`);
-      const url = res.data.data?.url || res.data.url;
+      const url = res.data.data?.download_url;
       if (url) window.open(url, '_blank');
       else setError('未获取到下载链接');
     } catch {
@@ -89,6 +92,10 @@ export default function ResultsPage() {
   // YouTube 缩略图 URL
   const thumbUrl = (videoId: string) =>
     `https://i.ytimg.com/vi/${videoId}/default.jpg`;
+  
+  // 高清缩略图 URL
+  const hdThumbUrl = (videoId: string) =>
+    `https://i.ytimg.com/vi/${videoId}/maxresdefault.jpg`;
 
   if (loading) return <div style={{ padding: '20px', color: '#999' }}>加载中...</div>;
 
@@ -148,7 +155,8 @@ export default function ResultsPage() {
                     <img
                       src={thumbUrl(r.video_id)}
                       alt={r.video_id}
-                      style={{ width: '60px', height: '45px', objectFit: 'cover', borderRadius: '2px' }}
+                      style={{ width: '60px', height: '45px', objectFit: 'cover', borderRadius: '2px', cursor: 'pointer' }}
+                      onClick={() => setEnlargedImage(r.video_id)}
                       onError={e => { (e.target as HTMLImageElement).style.display = 'none'; }}
                     />
                   </td>
@@ -205,6 +213,26 @@ export default function ResultsPage() {
           </button>
         </div>
       )}
+
+      {/* 图片放大模态框 */}
+      {enlargedImage && (
+        <div style={styles.modal} onClick={() => setEnlargedImage(null)}>
+          <div style={styles.modalContent} onClick={e => e.stopPropagation()}>
+            <button style={styles.closeBtn} onClick={() => setEnlargedImage(null)}>✕</button>
+            <img
+              src={hdThumbUrl(enlargedImage)}
+              alt={enlargedImage}
+              style={styles.enlargedImg}
+              onError={e => { (e.target as HTMLImageElement).src = thumbUrl(enlargedImage); }}
+            />
+            <div style={styles.videoLink}>
+              <a href={`https://www.youtube.com/watch?v=${enlargedImage}`} target="_blank" rel="noopener noreferrer" style={styles.link}>
+                在 YouTube 中打开
+              </a>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -240,5 +268,29 @@ const styles: Record<string, React.CSSProperties> = {
     background: '#fafafa', border: '1px solid #f0f0f0', borderRadius: '4px',
     padding: '8px', fontSize: '11px', maxHeight: '200px', overflow: 'auto',
     whiteSpace: 'pre-wrap', wordBreak: 'break-all', marginTop: '4px',
+  },
+  modal: {
+    position: 'fixed', top: 0, left: 0, right: 0, bottom: 0,
+    background: 'rgba(0, 0, 0, 0.8)', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', zIndex: 1000,
+  },
+  modalContent: {
+    position: 'relative', background: '#fff', borderRadius: '8px',
+    padding: '20px', maxWidth: '90vw', maxHeight: '90vh', overflow: 'auto',
+  },
+  closeBtn: {
+    position: 'absolute', top: '10px', right: '10px', background: '#fff',
+    border: 'none', fontSize: '24px', cursor: 'pointer', width: '32px',
+    height: '32px', borderRadius: '50%', display: 'flex', alignItems: 'center',
+    justifyContent: 'center', boxShadow: '0 2px 8px rgba(0,0,0,0.15)',
+  },
+  enlargedImg: {
+    maxWidth: '100%', maxHeight: '80vh', display: 'block', margin: '0 auto',
+  },
+  videoLink: {
+    textAlign: 'center', marginTop: '12px',
+  },
+  link: {
+    color: '#1677ff', textDecoration: 'none', fontSize: '14px',
   },
 };

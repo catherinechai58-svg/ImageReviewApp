@@ -11,24 +11,33 @@ const api = axios.create({
 
 // 请求拦截器 — 自动附加 Authorization header
 api.interceptors.request.use(async (reqConfig) => {
+  // 等待一小段时间，确保 localStorage 已加载
+  await new Promise(resolve => setTimeout(resolve, 50));
+  
   let tokens = getStoredTokens();
+  
+  console.log('[API] Request interceptor - tokens:', tokens ? 'found' : 'not found');
 
   // 尝试检查 token 是否快过期（5 分钟内），提前刷新
   if (tokens) {
     try {
       const payload = JSON.parse(atob(tokens.idToken.split('.')[1]));
       const expiresIn = payload.exp * 1000 - Date.now();
+      console.log('[API] Token expires in:', Math.floor(expiresIn / 1000), 'seconds');
       if (expiresIn < 5 * 60 * 1000) {
         const refreshed = await refreshSession();
         if (refreshed) tokens = refreshed;
       }
-    } catch {
-      // 解析失败，继续使用现有 token
+    } catch (e) {
+      console.error('[API] Token parse error:', e);
     }
   }
 
   if (tokens) {
     reqConfig.headers.Authorization = `Bearer ${tokens.idToken}`;
+    console.log('[API] Authorization header set');
+  } else {
+    console.warn('[API] No token available for request');
   }
   return reqConfig;
 });

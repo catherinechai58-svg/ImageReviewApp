@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html>
+<head><title>Token Debug</title></head>
+<body>
+<h2>LocalStorage Debug</h2>
+<button onclick="check()">Check Token</button>
+<pre id="output"></pre>
+<script>
+function check() {
+  const token = localStorage.getItem('auth_tokens');
+  const output = document.getElementById('output');
+  if (token) {
+    try {
+      const parsed = JSON.parse(token);
+      const payload = JSON.parse(atob(parsed.idToken.split('.')[1]));
+      output.textContent = JSON.stringify({
+        hasToken: true,
+        exp: new Date(payload.exp * 1000).toISOString(),
+        isExpired: payload.exp * 1000 < Date.now(),
+        username: payload['cognito:username'] || payload.username
+      }, null, 2);
+    } catch (e) {
+      output.textContent = 'Parse error: ' + e.message;
+    }
+  } else {
+    output.textContent = 'No token found in localStorage';
+  }
+}
+</script>
+</body>
+</html>

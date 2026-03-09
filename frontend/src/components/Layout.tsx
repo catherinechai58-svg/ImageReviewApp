@@ -1,10 +1,24 @@
+import { useEffect, useState } from 'react';
 import { Outlet, useNavigate, NavLink } from 'react-router-dom';
 import { useAuth } from '../contexts/AuthContext';
+import api from '../services/api';
 
-// 主布局 — 顶部导航栏 + 内容区域
 export default function Layout() {
   const { logout } = useAuth();
   const navigate = useNavigate();
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  useEffect(() => {
+    api.get('/users/me')
+      .then((res) => {
+        console.log('[Layout] /users/me full response:', JSON.stringify(res.data));
+        const role = res.data?.data?.role;
+        setIsAdmin(role === 'admin');
+      })
+      .catch((err) => {
+        console.error('[Layout] /users/me failed:', err.response?.status, err.response?.data || err.message);
+      });
+  }, []);
 
   const handleLogout = () => {
     logout();
@@ -25,6 +39,16 @@ export default function Layout() {
           <NavLink to="/tasks" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
             任务管理
           </NavLink>
+          {isAdmin && (
+            <NavLink to="/users" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
+              用户管理
+            </NavLink>
+          )}
+          {isAdmin && (
+            <NavLink to="/settings" style={({ isActive }) => ({ ...styles.link, ...(isActive ? styles.activeLink : {}) })}>
+              系统设置
+            </NavLink>
+          )}
         </div>
         <button onClick={handleLogout} style={styles.logoutBtn}>退出登录</button>
       </nav>
@@ -37,42 +61,15 @@ export default function Layout() {
 
 const styles: Record<string, React.CSSProperties> = {
   nav: {
-    display: 'flex',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    padding: '0 24px',
-    height: '48px',
-    background: '#fff',
-    borderBottom: '1px solid #e8e8e8',
+    display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+    padding: '0 24px', height: '48px', background: '#fff', borderBottom: '1px solid #e8e8e8',
   },
-  navLeft: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: '24px',
-  },
-  logo: {
-    fontWeight: 'bold',
-    fontSize: '16px',
-    color: '#1677ff',
-    marginRight: '8px',
-  },
-  link: {
-    textDecoration: 'none',
-    color: '#666',
-    fontSize: '14px',
-    padding: '4px 0',
-  },
-  activeLink: {
-    color: '#1677ff',
-    fontWeight: 500,
-  },
+  navLeft: { display: 'flex', alignItems: 'center', gap: '24px' },
+  logo: { fontWeight: 'bold', fontSize: '16px', color: '#1677ff', marginRight: '8px' },
+  link: { textDecoration: 'none', color: '#666', fontSize: '14px', padding: '4px 0' },
+  activeLink: { color: '#1677ff', fontWeight: 500 },
   logoutBtn: {
-    background: 'none',
-    border: '1px solid #d9d9d9',
-    borderRadius: '4px',
-    padding: '4px 12px',
-    cursor: 'pointer',
-    fontSize: '13px',
-    color: '#666',
+    background: 'none', border: '1px solid #d9d9d9', borderRadius: '4px',
+    padding: '4px 12px', cursor: 'pointer', fontSize: '13px', color: '#666',
   },
 };
