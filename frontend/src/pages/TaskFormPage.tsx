@@ -16,14 +16,14 @@ interface FormData {
   name: string;
   description: string;
   channels: string;
-  template_id: string;
+  template_ids: string[];
   run_mode: string;
   model_id: string;
   date_from: string;
   date_to: string;
 }
 
-const emptyForm: FormData = { name: '', description: '', channels: '', template_id: '', run_mode: 'batch', model_id: '', date_from: '', date_to: '' };
+const emptyForm: FormData = { name: '', description: '', channels: '', template_ids: [], run_mode: 'batch', model_id: '', date_from: '', date_to: '' };
 
 export default function TaskFormPage() {
   const navigate = useNavigate();
@@ -55,7 +55,7 @@ export default function TaskFormPage() {
         name: t.name || '',
         description: t.description || '',
         channels: (t.channel_ids || []).join('\n'),
-        template_id: t.template_id || '',
+        template_ids: t.template_ids || (t.template_id ? [t.template_id] : []),
         run_mode: t.run_mode || 'batch',
         model_id: t.model_id || '',
         date_from: t.date_from || '',
@@ -76,7 +76,7 @@ export default function TaskFormPage() {
 
     if (!form.name.trim()) { setError('任务名称不能为空'); return; }
     if (!form.channels.trim()) { setError('请输入至少一个频道 ID 或 URL'); return; }
-    if (!form.template_id) { setError('请选择提示词模板'); return; }
+    if (form.template_ids.length === 0) { setError('请选择至少一个提示词模板'); return; }
     if (!form.model_id) { setError('请选择推理模型'); return; }
 
     const channelIds = form.channels
@@ -88,7 +88,8 @@ export default function TaskFormPage() {
       name: form.name.trim(),
       description: form.description.trim(),
       channel_ids: channelIds,
-      template_id: form.template_id,
+      template_ids: form.template_ids,
+      template_id: form.template_ids[0] || '',
       run_mode: form.run_mode,
       model_id: form.model_id,
       date_from: form.date_from,
@@ -156,19 +157,33 @@ export default function TaskFormPage() {
           <div style={{ fontSize: '12px', color: '#999', marginTop: '4px' }}>支持频道 ID 或频道 URL，多个用换行或逗号分隔</div>
         </div>
 
-        {/* 提示词模板选择 */}
+        {/* 提示词模板选择（多选）*/}
         <div style={styles.field}>
           <label style={styles.label}>提示词模板 <span style={{ color: '#ff4d4f' }}>*</span></label>
-          <select
-            style={styles.input}
-            value={form.template_id}
-            onChange={(e) => handleChange('template_id', e.target.value)}
-          >
-            <option value="">请选择模板</option>
+          <div style={styles.checkboxList}>
             {prompts.map((p) => (
-              <option key={p.template_id} value={p.template_id}>{p.name}</option>
+              <label key={p.template_id} style={styles.checkboxItem}>
+                <input
+                  type="checkbox"
+                  checked={form.template_ids.includes(p.template_id)}
+                  onChange={(e) => {
+                    const next = e.target.checked
+                      ? [...form.template_ids, p.template_id]
+                      : form.template_ids.filter(id => id !== p.template_id);
+                    setForm(prev => ({ ...prev, template_ids: next }));
+                  }}
+                  style={{ marginRight: '6px' }}
+                />
+                {p.name}
+              </label>
             ))}
-          </select>
+            {prompts.length === 0 && <span style={{ color: '#999', fontSize: '13px' }}>暂无模板</span>}
+          </div>
+          {form.template_ids.length > 0 && (
+            <div style={{ fontSize: '12px', color: '#1677ff', marginTop: '4px' }}>
+              已选 {form.template_ids.length} 个模板
+            </div>
+          )}
         </div>
 
         {/* 推理模型选择 */}
@@ -255,5 +270,12 @@ const styles: Record<string, React.CSSProperties> = {
   defaultBtn: {
     background: '#fff', border: '1px solid #d9d9d9', borderRadius: '4px',
     padding: '6px 16px', cursor: 'pointer', fontSize: '14px',
+  },
+  checkboxList: {
+    border: '1px solid #d9d9d9', borderRadius: '4px', padding: '8px 12px',
+    display: 'flex', flexDirection: 'column' as const, gap: '8px', background: '#fff',
+  },
+  checkboxItem: {
+    display: 'flex', alignItems: 'center', fontSize: '14px', cursor: 'pointer',
   },
 };

@@ -1,5 +1,7 @@
 """任务管理路由 — CRUD、执行、重做、日志、结果查询、下载。"""
 
+import csv
+import io
 import json
 import os
 import re
@@ -8,6 +10,7 @@ from datetime import datetime, timezone
 
 from boto3.dynamodb.conditions import Attr, Key
 from fastapi import APIRouter, Depends, Query
+from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from backend.app.auth import verify_token
@@ -59,6 +62,7 @@ class CreateTaskRequest(BaseModel):
     description: str = ""
     channel_ids: list[str] | str = []
     template_id: str = ""
+    template_ids: list[str] = []
     run_mode: str = ""
     model_id: str = ""
     date_from: str = ""
@@ -73,7 +77,9 @@ async def create_task(body: CreateTaskRequest, user: dict = Depends(verify_token
         missing.append({"field": "name", "message": "任务名称不能为空"})
     if not body.channel_ids:
         missing.append({"field": "channel_ids", "message": "频道列表不能为空"})
-    if not body.template_id:
+    # 兼容 template_ids（多选）和 template_id（单选）
+    effective_template_ids = body.template_ids or ([body.template_id] if body.template_id else [])
+    if not effective_template_ids:
         missing.append({"field": "template_id", "message": "提示词模板 ID 不能为空"})
     if not body.run_mode:
         missing.append({"field": "run_mode", "message": "运行模式不能为空"})
@@ -94,10 +100,10 @@ async def create_task(body: CreateTaskRequest, user: dict = Depends(verify_token
             details=[{"field": "model_id", "message": f"模型 {model_id} 不在可选列表中"}],
         )
 
-    template = dynamodb.get_item(_PROMPT_TEMPLATES_TABLE, {"template_id": body.template_id})
+    template = dynamodb.get_item(_PROMPT_TEMPLATES_TABLE, {"template_id": effective_template_ids[0]})
     if not template:
         raise ValidationError("提示词模板不存在",
-                              details=[{"field": "template_id", "message": f"模板 {body.template_id} 不存在"}])
+                              details=[{"field": "template_id", "message": f"模板 {effective_template_ids[0]} 不存在"}])
 
     raw_channels = body.channel_ids if isinstance(body.channel_ids, list) else [body.channel_ids]
     channel_ids = [_parse_channel_id(ch) for ch in raw_channels]
@@ -110,7 +116,9 @@ async def create_task(body: CreateTaskRequest, user: dict = Depends(verify_token
     task_id = str(uuid.uuid4())
     item = {
         "task_id": task_id, "name": body.name, "description": body.description,
-        "channel_ids": channel_ids, "template_id": body.template_id,
+        "channel_ids": channel_ids,
+        "template_id": effective_template_ids[0],
+        "template_ids": effective_template_ids,
         "run_mode": body.run_mode, "model_id": model_id, "status": "pending",
         "date_from": body.date_from, "date_to": body.date_to,
         "total_images": 0, "success_count": 0, "failure_count": 0,
@@ -154,6 +162,7 @@ class UpdateTaskRequest(BaseModel):
     description: str | None = None
     channel_ids: list[str] | str | None = None
     template_id: str | None = None
+    template_ids: list[str] | None = None
     run_mode: str | None = None
     model_id: str | None = None
     date_from: str | None = None
@@ -187,11 +196,20 @@ async def update_task(task_id: str, body: UpdateTaskRequest, user: dict = Depend
         if not parsed:
             raise ValidationError("解析后频道列表为空")
         updates["channel_ids"] = parsed
-    if body.template_id is not None:
+    if body.template_ids is not None:
+        if not body.template_ids:
+            raise ValidationError("提示词模板不能为空")
+        tpl = dynamodb.get_item(_PROMPT_TEMPLATES_TABLE, {"template_id": body.template_ids[0]})
+        if not tpl:
+            raise ValidationError(f"模板 {body.template_ids[0]} 不存在")
+        updates["template_ids"] = body.template_ids
+        updates["template_id"] = body.template_ids[0]
+    elif body.template_id is not None:
         tpl = dynamodb.get_item(_PROMPT_TEMPLATES_TABLE, {"template_id": body.template_id})
         if not tpl:
             raise ValidationError(f"模板 {body.template_id} 不存在")
         updates["template_id"] = body.template_id
+        updates["template_ids"] = [body.template_id]
     if body.run_mode is not None:
         if body.run_mode not in _VALID_RUN_MODES:
             raise ValidationError(f"不支持的运行模式: {body.run_mode}")
@@ -466,6 +484,7 @@ async def get_task_results(
     last_evaluated_key: str | None = Query(default=None),
     status: str | None = Query(default=None),
     review_result: str | None = Query(default=None),
+    exclude_teen: bool = Query(default=False),
     user: dict = Depends(verify_token),
 ):
     """GET /tasks/{id}/results — 分页查询结果。"""
@@ -504,6 +523,13 @@ async def get_task_results(
     )
 
     response = {"data": result["Items"]}
+    if exclude_teen:
+        def _is_teen(item: dict) -> bool:
+            rj = item.get("result_json") or {}
+            detail = rj.get("review_detail", [{}])
+            detail_obj = detail[0] if isinstance(detail, list) and detail else (detail if isinstance(detail, dict) else {})
+            return detail_obj.get("age_group") == "teen"
+        response["data"] = [r for r in result["Items"] if not _is_teen(r)]
     if "LastEvaluatedKey" in result:
         response["last_evaluated_key"] = result["LastEvaluatedKey"]
     return response
@@ -511,7 +537,63 @@ async def get_task_results(
 
 @router.get("/{task_id}/results/download")
 async def download_results(task_id: str, user: dict = Depends(verify_token)):
-    """GET /tasks/{id}/results/download — 生成预签名下载 URL。"""
-    s3_key = build_results_path(task_id)
-    url = generate_presigned_url(bucket=None, key=s3_key)
-    return {"data": {"download_url": url, "s3_key": s3_key}, "message": "查询成功"}
+    """GET /tasks/{id}/results/download — 生成 CSV 下载（排除 age_group=teen 的记录）。"""
+    from backend.shared.dynamodb import query_all_pages
+    from decimal import Decimal
+
+    def _to_native(obj):
+        if isinstance(obj, Decimal):
+            return int(obj) if obj % 1 == 0 else float(obj)
+        elif isinstance(obj, dict):
+            return {k: _to_native(v) for k, v in obj.items()}
+        elif isinstance(obj, list):
+            return [_to_native(i) for i in obj]
+        return obj
+
+    all_rows = query_all_pages(
+        table_name=_TASK_RESULTS_TABLE,
+        key_condition=Key("task_id").eq(task_id),
+    )
+
+    # 过滤掉 age_group == "teen" 的记录
+    filtered = []
+    for r in all_rows:
+        rj = _to_native(r.get("result_json") or {})
+        detail = rj.get("review_detail", [{}])
+        detail_obj = detail[0] if isinstance(detail, list) and detail else (detail if isinstance(detail, dict) else {})
+        if detail_obj.get("age_group") == "teen":
+            continue
+        filtered.append((r, rj, detail_obj))
+
+    # 收集所有 result_json 字段名作为动态列
+    detail_keys: list[str] = []
+    for _, _, detail_obj in filtered:
+        for k in detail_obj.keys():
+            if k not in detail_keys:
+                detail_keys.append(k)
+
+    base_cols = ["task_id", "video_id", "channel_id", "channel_name", "status", "review_result"]
+    fieldnames = base_cols + detail_keys
+
+    output = io.StringIO()
+    writer = csv.DictWriter(output, fieldnames=fieldnames, extrasaction="ignore")
+    writer.writeheader()
+    for r, rj, detail_obj in filtered:
+        row = {
+            "task_id": r.get("task_id", ""),
+            "video_id": r.get("video_id", ""),
+            "channel_id": r.get("channel_id", ""),
+            "channel_name": r.get("channel_name", ""),
+            "status": r.get("status", ""),
+            "review_result": r.get("review_result", ""),
+        }
+        row.update({k: detail_obj.get(k, "") for k in detail_keys})
+        writer.writerow(row)
+
+    output.seek(0)
+    filename = f"results_{task_id}.csv"
+    return StreamingResponse(
+        iter([output.getvalue()]),
+        media_type="text/csv",
+        headers={"Content-Disposition": f"attachment; filename={filename}"},
+    )

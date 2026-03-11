@@ -30,6 +30,7 @@ export default function ResultsPage() {
   // 过滤条件
   const [filterReview, setFilterReview] = useState('');
   const [filterStatus, setFilterStatus] = useState('');
+  const [excludeTeen, setExcludeTeen] = useState(false);
 
   // 展开的 result_json 行
   const [expandedRows, setExpandedRows] = useState<Set<string>>(new Set());
@@ -45,6 +46,7 @@ export default function ResultsPage() {
       if (append && lastKey) params.last_evaluated_key = lastKey;
       if (filterReview) params.review_result = filterReview;
       if (filterStatus) params.status = filterStatus;
+      if (excludeTeen) params.exclude_teen = 'true';
 
       const res = await api.get(`/tasks/${id}/results`, { params });
       const data = res.data.data || [];
@@ -59,24 +61,27 @@ export default function ResultsPage() {
       setLoading(false);
       setLoadingMore(false);
     }
-  }, [id, lastKey, filterReview, filterStatus]);
+  }, [id, lastKey, filterReview, filterStatus, excludeTeen]);
 
   // 初始加载 & 过滤变化时重新加载
   useEffect(() => {
     setResults([]);
     setLastKey(null);
     fetchResults(false);
-  }, [id, filterReview, filterStatus]);
+  }, [id, filterReview, filterStatus, excludeTeen]);
 
-  // 下载结果文件
+  // 下载结果文件（CSV）
   const handleDownload = async () => {
     try {
-      const res = await api.get(`/tasks/${id}/results/download`);
-      const url = res.data.data?.download_url;
-      if (url) window.open(url, '_blank');
-      else setError('未获取到下载链接');
+      const res = await api.get(`/tasks/${id}/results/download`, { responseType: 'blob' });
+      const url = window.URL.createObjectURL(new Blob([res.data], { type: 'text/csv' }));
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `results_${id}.csv`;
+      a.click();
+      window.URL.revokeObjectURL(url);
     } catch {
-      setError('获取下载链接失败');
+      setError('下载失败');
     }
   };
 
@@ -126,6 +131,13 @@ export default function ResultsPage() {
             <option value="">全部</option>
             <option value="success">success</option>
             <option value="failed">failed</option>
+          </select>
+        </label>
+        <label style={styles.filterLabel}>
+          识别结果：
+          <select value={excludeTeen ? 'exclude_teen' : 'all'} onChange={e => setExcludeTeen(e.target.value === 'exclude_teen')} style={styles.select}>
+            <option value="all">全部</option>
+            <option value="exclude_teen">排除 teen</option>
           </select>
         </label>
       </div>

@@ -217,7 +217,7 @@ class InfraStack(cdk.Stack):
                 origin=origins.S3BucketOrigin.with_origin_access_control(
                     self.frontend_bucket,
                 ),
-                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.REDIRECT_TO_HTTPS,
+                viewer_protocol_policy=cloudfront.ViewerProtocolPolicy.ALLOW_ALL,
             ),
             default_root_object="index.html",
             error_responses=[
