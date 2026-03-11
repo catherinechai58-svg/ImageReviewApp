@@ -488,6 +488,13 @@ async def get_task_results(
     user: dict = Depends(verify_token),
 ):
     """GET /tasks/{id}/results — 分页查询结果。"""
+    # 所有权校验
+    task = dynamodb.get_item(_TASKS_TABLE, {"task_id": task_id})
+    if not task:
+        raise NotFoundError(f"任务 {task_id} 不存在")
+    if task.get("created_by", "") != user.get("username", ""):
+        raise NotFoundError(f"任务 {task_id} 不存在")
+
     last_key = None
     if last_evaluated_key:
         try:
@@ -538,6 +545,13 @@ async def get_task_results(
 @router.get("/{task_id}/results/download")
 async def download_results(task_id: str, user: dict = Depends(verify_token)):
     """GET /tasks/{id}/results/download — 生成 CSV 下载（排除 age_group=teen 的记录）。"""
+    # 所有权校验
+    task = dynamodb.get_item(_TASKS_TABLE, {"task_id": task_id})
+    if not task:
+        raise NotFoundError(f"任务 {task_id} 不存在")
+    if task.get("created_by", "") != user.get("username", ""):
+        raise NotFoundError(f"任务 {task_id} 不存在")
+
     from backend.shared.dynamodb import query_all_pages
     from decimal import Decimal
 

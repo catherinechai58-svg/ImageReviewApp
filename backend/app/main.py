@@ -34,13 +34,18 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Image Review API", lifespan=lifespan)
 
-# CORS 中间件 — 允许所有来源（与现有 API Gateway 一致）
+# CORS 中间件 — 限制到已知前端域名
+_ALLOWED_ORIGINS = [o.strip() for o in os.environ.get(
+    "ALLOWED_ORIGINS",
+    "http://drotggg5bw4si.cloudfront.net,https://drotggg5bw4si.cloudfront.net"
+).split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_ALLOWED_ORIGINS,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Authorization", "Content-Type"],
 )
 
 # 注册统一异常处理
