@@ -3,13 +3,16 @@
 import os
 
 import boto3
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel
+from slowapi import Limiter
+from slowapi.util import get_remote_address
 
 from backend.app.auth import verify_token
 from backend.shared.errors import AuthenticationError, ValidationError
 
 router = APIRouter()
+limiter = Limiter(key_func=get_remote_address)
 
 _cognito = boto3.client("cognito-idp", region_name=os.environ.get("AWS_REGION_NAME", "ap-northeast-1"))
 _USER_POOL_ID = os.environ.get("USER_POOL_ID", "")
@@ -34,7 +37,8 @@ class ChangePasswordRequest(BaseModel):
 
 
 @router.post("/login")
-async def login(body: LoginRequest):
+@limiter.limit("10/minute")
+async def login(request: Request, body: LoginRequest):
     """POST /auth/login — 登录，首次登录返回 challenge。"""
     if not body.username or not body.password:
         details = []
@@ -83,7 +87,8 @@ async def login(body: LoginRequest):
 
 
 @router.post("/force-change-password")
-async def force_change_password(body: ForceChangePasswordRequest):
+@limiter.limit("10/minute")
+async def force_change_password(request: Request, body: ForceChangePasswordRequest):
     """POST /auth/force-change-password — 首次登录强制修改密码。"""
     if not body.username or not body.new_password or not body.session:
         raise ValidationError("参数不完整")

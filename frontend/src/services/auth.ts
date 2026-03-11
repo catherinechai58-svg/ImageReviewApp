@@ -27,12 +27,12 @@ function saveTokens(data: any): AuthTokens {
     accessToken: data.access_token,
     refreshToken: data.refresh_token,
   };
-  localStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
+  sessionStorage.setItem(TOKEN_KEY, JSON.stringify(tokens));
   return tokens;
 }
 
 export function getStoredTokens(): AuthTokens | null {
-  const raw = localStorage.getItem(TOKEN_KEY);
+  const raw = sessionStorage.getItem(TOKEN_KEY);
   if (!raw) return null;
   try {
     return JSON.parse(raw) as AuthTokens;
@@ -42,7 +42,7 @@ export function getStoredTokens(): AuthTokens | null {
 }
 
 export function clearTokens(): void {
-  localStorage.removeItem(TOKEN_KEY);
+  sessionStorage.removeItem(TOKEN_KEY);
 }
 
 /**

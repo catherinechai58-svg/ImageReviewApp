@@ -249,13 +249,16 @@ class InfraStack(cdk.Stack):
         # 授予 Bedrock 批量推理角色对图片桶的读写权限
         self.image_bucket.grant_read_write(self.bedrock_batch_role)
 
-        # Bedrock 模型调用权限
+        # Bedrock 模型调用权限 — 限制到具体模型
         self.bedrock_batch_role.add_to_policy(
             iam.PolicyStatement(
-                actions=[
-                    "bedrock:InvokeModel",
+                actions=["bedrock:InvokeModel"],
+                resources=[
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.nova-lite-v1:0",
+                    f"arn:aws:bedrock:{self.region}::foundation-model/amazon.nova-2-lite-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/apac.amazon.nova-lite-v1:0",
+                    f"arn:aws:bedrock:*::foundation-model/global.amazon.nova-2-lite-v1:0",
                 ],
-                resources=["*"],
             )
         )
 
